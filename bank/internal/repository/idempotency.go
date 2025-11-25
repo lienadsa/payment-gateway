@@ -18,12 +18,14 @@ type IdempotencyRepository interface {
 }
 
 type idempotencyRepository struct {
-	db *db.DB
+	exec db.Executor
 }
 
 // NewIdempotencyRepository creates a new IdempotencyRepository
-func NewIdempotencyRepository(database *db.DB) IdempotencyRepository {
-	return &idempotencyRepository{db: database}
+// The exec parameter can be either *db.DB or *db.Tx, allowing the repository
+// to work with or without transactions
+func NewIdempotencyRepository(exec db.Executor) IdempotencyRepository {
+	return &idempotencyRepository{exec: exec}
 }
 
 // Get retrieves a cached idempotency key and its response
@@ -35,7 +37,7 @@ func (r *idempotencyRepository) Get(ctx context.Context, key, requestPath string
 	`
 
 	var idemKey models.IdempotencyKey
-	err := r.db.QueryRowContext(ctx, query, key, requestPath).Scan(
+	err := r.exec.QueryRowContext(ctx, query, key, requestPath).Scan(
 		&idemKey.Key,
 		&idemKey.RequestPath,
 		&idemKey.ResponseStatus,
@@ -61,7 +63,7 @@ func (r *idempotencyRepository) Store(ctx context.Context, idemKey *models.Idemp
 		ON CONFLICT (key, request_path) DO NOTHING
 	`
 
-	_, err := r.db.ExecContext(
+	_, err := r.exec.ExecContext(
 		ctx, query,
 		idemKey.Key,
 		idemKey.RequestPath,
@@ -84,7 +86,7 @@ func (r *idempotencyRepository) DeleteOlderThan(ctx context.Context, before time
 		WHERE created_at < $1
 	`
 
-	result, err := r.db.ExecContext(ctx, query, before)
+	result, err := r.exec.ExecContext(ctx, query, before)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete old idempotency keys: %w", err)
 	}

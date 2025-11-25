@@ -40,8 +40,14 @@ func main() {
 		if err = database.Close(); err != nil {
 			logger.Error("failed to close database connection", "error", err)
 		}
-
 	}()
+
+	// Cleanup old idempotency keys (older than 24 hours)
+	logger.Info("cleaning up old idempotency keys")
+	cutoffTime := time.Now().Add(-24 * time.Hour)
+	if _, err := database.ExecContext(ctx, "DELETE FROM idempotency_keys WHERE created_at < $1", cutoffTime); err != nil {
+		logger.Warn("failed to cleanup old idempotency keys", "error", err)
+	}
 
 	mux := http.NewServeMux()
 

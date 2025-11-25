@@ -15,17 +15,20 @@ import (
 type AccountRepository interface {
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Account, error)
 	FindByAccountNumber(ctx context.Context, accountNumber string) (*models.Account, error)
+	FindByAccountNumberForUpdate(ctx context.Context, accountNumber string) (*models.Account, error)
 	AdjustBalances(ctx context.Context, accountID uuid.UUID, balanceDelta, availableBalanceDelta int64) error
 }
 
 // accountRepository implements AccountRepository
 type accountRepository struct {
-	db *db.DB
+	exec db.Executor
 }
 
 // NewAccountRepository creates a new AccountRepository
-func NewAccountRepository(database *db.DB) AccountRepository {
-	return &accountRepository{db: database}
+// The exec parameter can be either *db.DB or *db.Tx, allowing the repository
+// to work with or without transactions
+func NewAccountRepository(exec db.Executor) AccountRepository {
+	return &accountRepository{exec: exec}
 }
 
 // FindByID retrieves an account by its UUID
@@ -38,7 +41,7 @@ func (r *accountRepository) FindByID(ctx context.Context, id uuid.UUID) (*models
 	`
 
 	var account models.Account
-	err := r.db.QueryRowContext(ctx, query, id).Scan(
+	err := r.exec.QueryRowContext(ctx, query, id).Scan(
 		&account.ID,
 		&account.AccountNumber,
 		&account.CVV,
@@ -70,7 +73,7 @@ func (r *accountRepository) FindByAccountNumber(ctx context.Context, accountNumb
 	`
 
 	var account models.Account
-	err := r.db.QueryRowContext(ctx, query, accountNumber).Scan(
+	err := r.exec.QueryRowContext(ctx, query, accountNumber).Scan(
 		&account.ID,
 		&account.AccountNumber,
 		&account.CVV,
@@ -92,6 +95,39 @@ func (r *accountRepository) FindByAccountNumber(ctx context.Context, accountNumb
 	return &account, nil
 }
 
+// FindByAccountNumberForUpdate retrieves an account by its account number with row-level lock
+func (r *accountRepository) FindByAccountNumberForUpdate(ctx context.Context, accountNumber string) (*models.Account, error) {
+	query := `
+		SELECT id, account_number, cvv, expiry_month, expiry_year,
+		       balance_cents, available_balance_cents, created_at, updated_at
+		FROM accounts
+		WHERE account_number = $1
+		FOR UPDATE
+	`
+
+	var account models.Account
+	err := r.exec.QueryRowContext(ctx, query, accountNumber).Scan(
+		&account.ID,
+		&account.AccountNumber,
+		&account.CVV,
+		&account.ExpiryMonth,
+		&account.ExpiryYear,
+		&account.BalanceCents,
+		&account.AvailableBalanceCents,
+		&account.CreatedAt,
+		&account.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("account not found: %w", err)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to find and lock account: %w", err)
+	}
+
+	return &account, nil
+}
+
 // AdjustBalances atomically adjusts the balance and available balance by the given deltas
 func (r *accountRepository) AdjustBalances(ctx context.Context, accountID uuid.UUID, balanceDelta, availableBalanceDelta int64) error {
 	query := `
@@ -102,7 +138,7 @@ func (r *accountRepository) AdjustBalances(ctx context.Context, accountID uuid.U
 		WHERE id = $1
 	`
 
-	result, err := r.db.ExecContext(ctx, query, accountID, balanceDelta, availableBalanceDelta)
+	result, err := r.exec.ExecContext(ctx, query, accountID, balanceDelta, availableBalanceDelta)
 	if err != nil {
 		return fmt.Errorf("failed to adjust account balances: %w", err)
 	}

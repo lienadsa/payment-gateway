@@ -20,12 +20,14 @@ type TransactionRepository interface {
 }
 
 type transactionRepository struct {
-	db *db.DB
+	exec db.Executor
 }
 
 // NewTransactionRepository creates a new TransactionRepository
-func NewTransactionRepository(database *db.DB) TransactionRepository {
-	return &transactionRepository{db: database}
+// The exec parameter can be either *db.DB or *db.Tx, allowing the repository
+// to work with or without transactions
+func NewTransactionRepository(exec db.Executor) TransactionRepository {
+	return &transactionRepository{exec: exec}
 }
 
 // Create inserts a new transaction into the database
@@ -50,7 +52,7 @@ func (r *transactionRepository) Create(ctx context.Context, tx *models.Transacti
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, NOW()))
 	`
 
-	_, err := r.db.ExecContext(
+	_, err := r.exec.ExecContext(
 		ctx, query,
 		tx.ID,
 		tx.AccountID,
@@ -82,7 +84,7 @@ func (r *transactionRepository) FindByID(ctx context.Context, id uuid.UUID) (*mo
 	var tx models.Transaction
 	var metadataJSON []byte
 
-	err := r.db.QueryRowContext(ctx, query, id).Scan(
+	err := r.exec.QueryRowContext(ctx, query, id).Scan(
 		&tx.ID,
 		&tx.AccountID,
 		&tx.Type,
@@ -125,7 +127,7 @@ func (r *transactionRepository) FindByReferenceID(ctx context.Context, refID uui
 	var tx models.Transaction
 	var metadataJSON []byte
 
-	err := r.db.QueryRowContext(ctx, query, refID, txnType).Scan(
+	err := r.exec.QueryRowContext(ctx, query, refID, txnType).Scan(
 		&tx.ID,
 		&tx.AccountID,
 		&tx.Type,
@@ -162,7 +164,7 @@ func (r *transactionRepository) UpdateStatus(ctx context.Context, id uuid.UUID, 
 		WHERE id = $1
 	`
 
-	result, err := r.db.ExecContext(ctx, query, id, status)
+	result, err := r.exec.ExecContext(ctx, query, id, status)
 	if err != nil {
 		return fmt.Errorf("failed to update transaction status: %w", err)
 	}
