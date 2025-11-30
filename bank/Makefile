@@ -4,10 +4,13 @@ help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 up:
-	@cd ../docker && docker compose up --build
+	@cd ../docker && docker compose up --build -d
 
 down:
 	@cd ../docker && docker compose down
+
+reset: ## Reset database to initial state (wipes all data)
+	@cd ../docker && docker compose down -v && docker compose up --build -d
 
 logs:
 	@cd ../docker && docker compose logs -f bank-api
